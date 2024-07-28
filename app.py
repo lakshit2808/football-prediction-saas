@@ -1,11 +1,34 @@
-import json
 import stripe
 import logging
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
+from DBConnection import increment_credits, usercheck_with_payment, register_user_with_payment, update_user_address
+
+payment_plans = [
+    {"credits": 10, "cost_cents": 3000},   # 10 credits for 30 dollars, which is 3000 cents
+    {"credits": 50, "cost_cents": 5000},   # 50 credits for 50 dollars, which is 5000 cents
+    {"credits": 100, "cost_cents": 10000}  # 100 credits for 100 dollars, which is 10000 cents
+]
+payment_data = {}
+
+# Process the payment data and update credits
+def process_payment(payment_data, payment_plans):
+    """Function to process payment and update user credits."""
+    email = payment_data['email']
+    phone = payment_data['phone']
+    amount_in_cents = payment_data['amount_in_cents']
+    
+    # Find the matching payment plan
+    for plan in payment_plans:
+        if plan['cost_cents'] == amount_in_cents:
+            credits_to_add = plan['credits']
+            increment_credits(email, credits_to_add)
+            break
+    else:
+        print("No matching payment plan found.")
+
 
 # Load environment variables
 load_dotenv()
@@ -20,24 +43,6 @@ app = FastAPI()
 # Logger setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# File path to save event data
-FILE_PATH = 'stripe_events.json'
-
-def save_event_to_file(event_data: dict):
-    # Read existing data from file
-    if os.path.exists(FILE_PATH):
-        with open(FILE_PATH, 'r') as file:
-            data = json.load(file)
-    else:
-        data = []
-
-    # Append new event data
-    data.append(event_data)
-
-    # Write updated data to file
-    with open(FILE_PATH, 'w') as file:
-        json.dump(data, file, indent=4)
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -71,7 +76,6 @@ async def webhook(request: Request):
         payment_status = event_data.get('payment_status')
         payment_intent = event_data.get('payment_intent')
         subscription = event_data.get('subscription')
-        line_items = event_data.get('line_items', {}).get('data', [])
 
         # Add details to event_data
         event_data.update({
@@ -82,31 +86,34 @@ async def webhook(request: Request):
             "payment_status": payment_status,
             "payment_intent": payment_intent,
             "subscription": subscription,
-            "line_items": []
+
         })
-
-        # Fetch customer details if customer_id is present
-        if customer_id:
-            try:
-                customer = stripe.Customer.retrieve(customer_id)
-                customer_email = customer.get('email')
-                event_data["customer_email"] = customer_email
-            except stripe.error.StripeError as e:
-                logger.error("Error retrieving customer details: %s", e)
-
-        # Add line items details
-        for item in line_items:
-            price_id = item.get('price', {}).get('id')
-            quantity = item.get('quantity')
-            unit_amount = item.get('price', {}).get('unit_amount')
-            event_data["line_items"].append({
-                "price_id": price_id,
-                "quantity": quantity,
-                "unit_amount": unit_amount
-            })
         
-        # Save event data to file
-        save_event_to_file(event_data)
+        # Save event data
+        customer_data = event_data['customer_details']
+    
+        payment_data = {
+            'name': customer_data['name'],
+            'email': customer_data['email'],
+            'phone': customer_data['phone'],
+            'amount_in_cents': event_data['amount_total'],
+            'status': event_data['payment_status'],
+        }
+
+        address = {
+            'city': customer_data['address']['city'],
+            "state:": customer_data['address']['state'],
+            "country": customer_data['address']['country']
+        }
+        if usercheck_with_payment(payment_data['email'], payment_data['phone']): # Check if address is none
+            register_user_with_payment(payment_data['name'], payment_data['phone'], payment_data['email'])
+            print("Registering User")
+
+        update_user_address(payment_data['email'], address)
+            
+        process_payment(payment_data, payment_plans)
+        print("Credits Added!")
+
         
     else:
         logger.info('Unhandled event type %s', event_type)

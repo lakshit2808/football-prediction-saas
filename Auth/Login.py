@@ -3,7 +3,7 @@ import smtplib
 from email.message import EmailMessage
 import streamlit as st
 import re
-import pandas as pd
+from DBConnection import usercheck
 
 def validate_email(email):
     # Simple regex for email validation
@@ -13,7 +13,6 @@ def validate_email(email):
 OTP_SECRET = 'JBSWY3DPEHPK3PXP'  # Use a more secure method for production
 app_pass = "uspv zxqm heml avwt"
 app_email = "kanwalakshit@gmail.com"
-USER_DATA_FILE = 'user_data.csv'
 
 def generate_otp(email):
     """Generate and send an OTP to the user's email."""
@@ -41,21 +40,19 @@ def verify_otp(otp_input):
 def login():
     """Handle user login"""
     st.header('Login')
-    df = pd.read_csv(USER_DATA_FILE)
     email = st.text_input('Email', '')
 
     if email:
         if not validate_email(email):
             st.error('Invalid Email. Please enter a valid email.')       
-        if email not in df['email'].values :
-            st.error('Email not found, Please Register Yourself.')
+        usercheck(email,st)
 
     if st.button('Send OTP'):
         otp = generate_otp(email)
         st.session_state['otp'] = otp
         st.session_state['email'] = email
         st.session_state['otp_sent'] = True
-        st.success('OTP has been sent to your email. Please check your inbox.')
+        # st.success('OTP has been sent to your email. Please check your inbox.')
 
     if st.session_state.get('otp_sent'):
         otp_input = st.text_input('Enter OTP', '')
@@ -66,4 +63,4 @@ def login():
                 st.success('OTP verified successfully! You are now logged in.')
                 st.experimental_rerun()
             else:
-                st.error('Invalid OTP. Please try again.')
+                st.error('Invalid OTP. Please try again. Or Regenerate the OTP')
